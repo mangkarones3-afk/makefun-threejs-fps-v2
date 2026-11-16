@@ -1,339 +1,419 @@
-// effects.js — short-lived visuals, all pooled: tracers with a hot core
-// that fades, impact sparks and debris, dust puffs, muzzle flashes with a
-// shared light, layered smoke, full explosions (flash, light, shockwave
-// ring, debris, dust) and the breach charge model with its own pulsing
-// light. Nothing here allocates per frame; pools are sized once at boot.
+// effects.js — every short-lived visual, pooled at boot and recycled
+// forever: tracers with a glowing halo, muzzle flashes with one shared
+// light, impact sparks that fall and bounce, debris, dust, ejecting
+// shell casings, rain drips, smoke, explosions and the breach charge.
+// The hot loop allocates nothing; per-particle data lives in flat
+// arrays, never in objects.
 
 import * as THREE from 'three';
 import { G } from './state.js';
 import { glowTexture } from './textures.js';
 
-const TRACERS = 40; const PARTICLES = 340;
-const FLASHES = 10; const DUST = 26;
-const BOOMS = 2;
+const TRACER_N = 44, PARTICLE_N = 380, CASING_N = 40, FLASH_N = 12, BOOM_N = 2;
 
-let tracerPool = []; let flashPool = [];
-let flashLight = null; let particleMesh = null;
-let pPos, pVel, pLife, pMaxLife, pSize, pGrav; // per-particle data
-let pCursor = 0; let dustPool = [];
-let boomPool = []; let chargeMesh = null;
-let chargeLightMesh = null; let chargeLight = null;
-let smokeGroup = null;
+let tracers = [], flashes = [], booms = [];
+let flashLight = null, particleMesh = null, casingMesh = null;
+let pPos, pVel, pLife, pSpan, pSize, pGrav, pBounce, pCursor = 0;
+let cPos, cVel, cRot, cSpin, cLife, cCursor = 0;
+let smokeGroup = null, chargeMesh = null, chargeLampMesh = null, chargeLight = null;
+let dripMesh = null, dripData = null;
 
-const _v = new THREE.Vector3(); const _m = new THREE.Matrix4();
-const _q = new THREE.Quaternion(); const _s = new THREE.Vector3();
-const _c = new THREE.Color();
+const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
+const _s = new THREE.Vector3(), _m = new THREE.Matrix4(), _c = new THREE.Color();
 
-function radialTexture(inner, outer) {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const g = c.getContext('2d'); const grad = g.createRadialGradient(32, 32, 2, 32, 32, 31);
-  grad.addColorStop(0, inner); grad.addColorStop(1, outer);
-  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
-  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+
+
+function addSprite(scene, mat) {
+  const spr = new THREE.Sprite(mat);
+  spr.visible = false;
+  scene.add(spr);
+  return spr;
 }
 
 export function initEffects(scene) {
-  // Tracers: an additive box with its own material each, so the core can
-  // burn bright and fade inside its 70 ms of life.
-  const tracerGeo = new THREE.BoxGeometry(0.035, 0.035, 1);
-  for (let i = 0; i < TRACERS; i++) {
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffc37a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-    const mesh = new THREE.Mesh(tracerGeo, mat); mesh.visible = false;
-    scene.add(mesh);
-    tracerPool.push({ mesh, life: 0, maxLife: 0.07 });
+  // Tracers: a hot core box wrapped in a wider, fainter halo box.
+  const coreGeo = new THREE.BoxGeometry(.03, .03, 1);
+  const haloGeo = new THREE.BoxGeometry(.1, .1, 1);
+  const tracerMat = (color, opacity) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false });
+  for (let i = 0; i < TRACER_N; i++) {
+    const group = new THREE.Group();
+    const core = new THREE.Mesh(coreGeo, tracerMat(0xffd9a0, 0));
+    const halo = new THREE.Mesh(haloGeo, tracerMat(0xff9a3e, 0));
+    group.add(core); group.add(halo);
+    group.visible = false;
+    scene.add(group);
+    tracers.push({ group, core, halo, life: 0, span: .075 });
   }
-
-  const flashTex = radialTexture('rgba(255,224,160,1)', 'rgba(255,140,40,0)');
-  for (let i = 0; i < FLASHES; i++) {
-    const mat = new THREE.SpriteMaterial({ map: flashTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
-    const spr = new THREE.Sprite(mat); spr.visible = false;
-    scene.add(spr);
-    flashPool.push({ spr, life: 0 });
+  const flashTex = glowTexture();
+  for (let i = 0; i < FLASH_N; i++) {
+    const spr = addSprite(scene, new THREE.SpriteMaterial({ map: flashTex, color: 0xffc37a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    flashes.push({ spr, life: 0 });
   }
-  flashLight = new THREE.PointLight(0xffb36b, 0, 10, 1.8); scene.add(flashLight);
-
-  // Impact particles in one InstancedMesh: sparks fly flat and fast,
-  // debris and flesh tumble under gravity.
-  particleMesh = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.95 }),
-    PARTICLES,
-  ); particleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  particleMesh.count = PARTICLES; particleMesh.frustumCulled = false;
-  scene.add(particleMesh); pPos = new Float32Array(PARTICLES * 3);
-  pVel = new Float32Array(PARTICLES * 3); pLife = new Float32Array(PARTICLES);
-  pMaxLife = new Float32Array(PARTICLES); pSize = new Float32Array(PARTICLES);
-  pGrav = new Float32Array(PARTICLES);
-  for (let i = 0; i < PARTICLES; i++) {
-    particleMesh.setColorAt(i, _c.setHex(0xffffff)); hideParticle(i);
-  }
+  flashLight = new THREE.PointLight(0xffb36b, 0, 11, 1.8);
+  scene.add(flashLight);
+  particleMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ transparent: true, opacity: .95 }), PARTICLE_N);
+  particleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  particleMesh.frustumCulled = false;
+  scene.add(particleMesh);
+  pPos = new Float32Array(PARTICLE_N * 3); pVel = new Float32Array(PARTICLE_N * 3);
+  pLife = new Float32Array(PARTICLE_N); pSpan = new Float32Array(PARTICLE_N);
+  pSize = new Float32Array(PARTICLE_N); pGrav = new Float32Array(PARTICLE_N);
+  pBounce = new Float32Array(PARTICLE_N);
+  for (let i = 0; i < PARTICLE_N; i++) { particleMesh.setColorAt(i, _c.setHex(0xffffff)); hideParticle(i); }
   if (particleMesh.instanceColor) particleMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-
-  // Dust puffs: soft sprites that swell and thin.
-  const dustTex = radialTexture('rgba(255,255,255,0.85)', 'rgba(255,255,255,0)');
-  for (let i = 0; i < DUST; i++) {
-    const mat = new THREE.SpriteMaterial({ map: dustTex, transparent: true, depthWrite: false, opacity: 0 });
-    const spr = new THREE.Sprite(mat); spr.visible = false;
-    scene.add(spr);
-    dustPool.push({ spr, life: 0, maxLife: 1, vx: 0, vy: 0, vz: 0, s0: 1, s1: 2, o0: 0.3 });
-  }
-
-  // Explosions: a big additive flash, a hard light, and a shockwave ring
-  // that runs across the ground.
+  casingMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(.021, .021, .052), new THREE.MeshStandardMaterial({ color: 0xc9a24d, roughness: .35, metalness: .8 }), CASING_N);
+  casingMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  casingMesh.frustumCulled = false;
+  scene.add(casingMesh);
+  cPos = new Float32Array(CASING_N * 3); cVel = new Float32Array(CASING_N * 3);
+  cRot = new Float32Array(CASING_N * 3); cSpin = new Float32Array(CASING_N * 3);
+  cLife = new Float32Array(CASING_N);
+  for (let i = 0; i < CASING_N; i++) hideCasing(i);
   const glowTex = glowTexture();
-  for (let i = 0; i < BOOMS; i++) {
-    const spr = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: glowTex, color: 0xffc37a, transparent: true, depthWrite: false,
-      blending: THREE.AdditiveBlending, opacity: 0,
-    }));
-    spr.visible = false; scene.add(spr);
-    const light = new THREE.PointLight(0xff9a4d, 0, 30, 1.7); scene.add(light);
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.86, 1, 40),
-      new THREE.MeshBasicMaterial({
-        color: 0xffd9a0, transparent: true, opacity: 0,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-      }),
-    ); ring.rotation.x = -Math.PI / 2;
-    ring.visible = false; scene.add(ring);
-    boomPool.push({ spr, light, ring, life: 0, scale: 1 });
+  for (let i = 0; i < BOOM_N; i++) {
+    const spr = addSprite(scene, new THREE.SpriteMaterial({ map: glowTex, color: 0xffc37a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+    const light = new THREE.PointLight(0xff9a4d, 0, 30, 1.7);
+    scene.add(light);
+    booms.push({ spr, light, life: 0, scale: 1 });
   }
-
-  smokeGroup = new THREE.Group(); scene.add(smokeGroup);
+  smokeGroup = new THREE.Group();
+  scene.add(smokeGroup);
 }
 
-function hideParticle(i) {
-  _m.makeScale(0, 0, 0); particleMesh.setMatrixAt(i, _m);
-}
+function hideParticle(i) { _m.makeScale(0, 0, 0); particleMesh.setMatrixAt(i, _m); }
+function hideCasing(i) { _m.makeScale(0, 0, 0); casingMesh.setMatrixAt(i, _m); }
 
-function emitParticle(x, y, z, vx, vy, vz, life, size, grav, color) {
-  const i = pCursor; pCursor = (pCursor + 1) % PARTICLES;
+function emit(x, y, z, vx, vy, vz, life, size, grav, color, bounce) {
+  const i = pCursor;
+  pCursor = (pCursor + 1) % PARTICLE_N;
   pPos[i * 3] = x; pPos[i * 3 + 1] = y; pPos[i * 3 + 2] = z;
-  pVel[i * 3] = vx; pVel[i * 3 + 1] = vy; pVel[i * 3 + 2] = vz; pMaxLife[i] = life;
-  pLife[i] = life; pSize[i] = size;
-  pGrav[i] = grav; particleMesh.setColorAt(i, _c.setHex(color));
+  pVel[i * 3] = vx; pVel[i * 3 + 1] = vy; pVel[i * 3 + 2] = vz;
+  pLife[i] = life; pSpan[i] = life; pSize[i] = size; pGrav[i] = grav; pBounce[i] = bounce;
+  particleMesh.setColorAt(i, _c.setHex(color));
   if (particleMesh.instanceColor) particleMesh.instanceColor.needsUpdate = true;
 }
 
 export function spawnTracer(x0, y0, z0, x1, y1, z1) {
-  for (const t of tracerPool) {
-    if (t.life > 0) continue; t.life = t.maxLife;
-    t.mesh.visible = true; t.mesh.material.opacity = 0.95;
-    _v.set(x1 - x0, y1 - y0, z1 - z0); const len = _v.length();
-    t.mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); t.mesh.scale.set(1, 1, len);
-    t.mesh.lookAt(x1, y1, z1); return;
+  for (const t of tracers) {
+    if (t.life > 0) continue;
+    t.life = t.span;
+    t.group.visible = true;
+    t.core.material.opacity = .88;
+    t.halo.material.opacity = .14;
+    _v.set(x1 - x0, y1 - y0, z1 - z0);
+    const len = Math.max(.1, _v.length());
+    t.group.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    t.group.scale.set(1, 1, len);
+    t.group.lookAt(x1, y1, z1);
+    return;
   }
 }
 
 export function spawnMuzzle(x, y, z) {
-  for (const f of flashPool) {
-    if (f.life > 0) continue; f.life = 0.05;
-    f.spr.visible = true; const s = 0.5 + Math.random() * 0.3;
-    f.spr.scale.set(s, s, 1); f.spr.position.set(x, y, z);
-    f.spr.material.rotation = Math.random() * Math.PI; break;
+  for (const f of flashes) {
+    if (f.life > 0) continue;
+    f.life = .05;
+    f.spr.visible = true;
+    const s = .5 + Math.random() * .3;
+    f.spr.scale.set(s, s, 1);
+    f.spr.position.set(x, y, z);
+    f.spr.material.rotation = Math.random() * Math.PI;
+    break;
   }
-  flashLight.position.set(x, y, z); flashLight.intensity = 22;
-  // One shot in three leaves a wisp of propellant smoke at the muzzle.
-  if (Math.random() < 0.34) spawnDust(x, y + 0.05, z, 1, 0x9aa0a6, 0.4);
+  // The shared light pulses to full, then falls off exponentially.
+  flashLight.position.set(x, y, z);
+  flashLight.intensity = 26;
+  if (Math.random() < .3) spawnDust(x, y + .05, z, 1, 0x9aa0a6, .4);
 }
 
-// Sparks where a bullet bites steel or concrete, a red bloom where it
-// bites flesh, and a low dust kick-up either way.
+// A casing leaves the ejection port: up and out to the shooter's
+// right, tumbling, to bounce once on the concrete and lie a moment.
+export function spawnCasing(x, y, z, rightX, rightZ) {
+  const i = cCursor;
+  cCursor = (cCursor + 1) % CASING_N;
+  cPos[i * 3] = x; cPos[i * 3 + 1] = y; cPos[i * 3 + 2] = z;
+  cVel[i * 3] = rightX * (.9 + Math.random() * .7) + (Math.random() - .5) * .3;
+  cVel[i * 3 + 1] = 1.5 + Math.random() * .7;
+  cVel[i * 3 + 2] = rightZ * (.9 + Math.random() * .7) + (Math.random() - .5) * .3;
+  cRot[i * 3] = Math.random() * 3; cRot[i * 3 + 1] = Math.random() * 3; cRot[i * 3 + 2] = Math.random() * 3;
+  cSpin[i * 3] = (Math.random() - .5) * 22; cSpin[i * 3 + 1] = (Math.random() - .5) * 22; cSpin[i * 3 + 2] = (Math.random() - .5) * 22;
+  cLife[i] = 1.15;
+}
+
+// Where a bullet lands: sparks that skip off the ground when they fall
+// back to it, debris chips that bounce once, a red bloom for flesh.
 export function spawnImpact(x, y, z, flesh) {
   if (flesh) {
     for (let n = 0; n < 8; n++) {
-      emitParticle(x, y, z,
-        (Math.random() - 0.5) * 2.6, Math.random() * 2.4 + 0.3, (Math.random() - 0.5) * 2.6,
-        0.26 + Math.random() * 0.26, 0.05 + Math.random() * 0.05, 5.5,
-        Math.random() < 0.5 ? 0xa12727 : 0x7e1d1d);
+      emit(x, y, z, (Math.random() - .5) * 2.6, Math.random() * 2.4 + .3, (Math.random() - .5) * 2.6, .26 + Math.random() * .26, .05 + Math.random() * .05, 5.5, Math.random() < .5 ? 0xa12727 : 0x7e1d1d, 0);
     }
-  } else {
-    for (let n = 0; n < 6; n++) { // sparks: fast, flat, barely fall
-      emitParticle(x, y, z,
-        (Math.random() - 0.5) * 5.2, Math.random() * 2.6 - 0.4, (Math.random() - 0.5) * 5.2,
-        0.14 + Math.random() * 0.16, 0.028 + Math.random() * 0.03, 1.6,
-        Math.random() < 0.5 ? 0xffd9a0 : 0xfff3d0);
-    }
-    for (let n = 0; n < 5; n++) { // debris chips
-      emitParticle(x, y, z,
-        (Math.random() - 0.5) * 2.4, Math.random() * 2.2 + 0.4, (Math.random() - 0.5) * 2.4,
-        0.28 + Math.random() * 0.25, 0.04 + Math.random() * 0.06, 5.5, 0xb9b0a0);
-    }
-    spawnDust(x, Math.max(0.25, y - 0.3), z, 1, 0xb2a08a, 0.55);
+    return;
+  }
+  for (let n = 0; n < 6; n++) {
+    emit(x, y, z, (Math.random() - .5) * 5.4, Math.random() * 2.8 - .4, (Math.random() - .5) * 5.4, .16 + Math.random() * .2, .026 + Math.random() * .03, 6.5, Math.random() < .5 ? 0xffd9a0 : 0xfff3d0, 2);
+  }
+  for (let n = 0; n < 5; n++) {
+    emit(x, y, z, (Math.random() - .5) * 2.4, Math.random() * 2.2 + .4, (Math.random() - .5) * 2.4, .3 + Math.random() * .28, .04 + Math.random() * .06, 6.0, 0xb9b0a0, 1);
+  }
+  spawnDust(x, Math.max(.25, y - .3), z, 1, 0xb2a08a, .55);
+}
+
+// The feedback system's burst: a tiered spray of sparks at a point — a
+// kill confirmed in the world, not just on the HUD.
+export function spawnBurst(x, y, z, count, tier) {
+  const speed = tier === 'large' ? 5.2 : tier === 'medium' ? 3.8 : 2.6;
+  for (let n = 0; n < count; n++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = (.3 + Math.random() * .7) * speed;
+    emit(x, y, z, Math.cos(a) * sp, Math.random() * speed * .9 + .4, Math.sin(a) * sp, .3 + Math.random() * .35, .03 + Math.random() * .045, 6.2, n % 3 === 0 ? 0xfff3d0 : 0xffc37a, 1);
+  }
+  if (tier === 'large') {
+    flashLight.position.set(x, y + .3, z);
+    flashLight.intensity = 60;
+    spawnDust(x, Math.max(.3, y), z, 2, 0xa89478, 1.3);
   }
 }
 
-// Soft dust: footfalls, landings, a body going down, blast wash. colour is
-// a hex tint; strength scales the puff's size.
+// Dust rides the particle pool: slow, heavy motes that hang a moment
+// where a bullet struck or a blast kicked the ground up.
 export function spawnDust(x, y, z, count, color = 0xb2a08a, strength = 1) {
   for (let n = 0; n < count; n++) {
-    for (const d of dustPool) {
-      if (d.life > 0) continue; d.maxLife = 0.55 + Math.random() * 0.5;
-      d.life = d.maxLife; d.spr.visible = true;
-      d.spr.material.color.setHex(color);
-      d.spr.position.set(
-        x + (Math.random() - 0.5) * 0.5 * strength,
-        y + Math.random() * 0.2,
-        z + (Math.random() - 0.5) * 0.5 * strength,
-      ); d.vx = (Math.random() - 0.5) * 0.7 * strength;
-      d.vy = 0.35 + Math.random() * 0.5; d.vz = (Math.random() - 0.5) * 0.7 * strength;
-      d.s0 = 0.55 * strength; d.s1 = (1.6 + Math.random() * 0.9) * strength;
-      d.o0 = 0.30; d.spr.material.opacity = d.o0;
-      const s = d.s0; d.spr.scale.set(s, s, 1);
-      break;
-    }
+    emit(x + (Math.random() - .5) * .5 * strength, y + Math.random() * .2, z + (Math.random() - .5) * .5 * strength,
+      (Math.random() - .5) * .7 * strength, .35 + Math.random() * .5, (Math.random() - .5) * .7 * strength,
+      .55 + Math.random() * .5, .15 * strength, .3, color, 0);
   }
 }
 
-// The full blast: flash, light, a ground shockwave, a debris fountain and
-// a ring of dust. scale 1 is the breach charge; grenades call it smaller.
+// The full blast: flash, light, a debris fountain and a ring of
+// dust. Grenades call it at .55 scale.
 export function spawnExplosion(x, y, z, scale = 1) {
-  for (const b of boomPool) {
-    if (b.life > 0) continue; b.life = 0.5;
-    b.scale = scale; b.spr.visible = true;
-    b.spr.position.set(x, y + 0.4 * scale, z); const s = 7 * scale;
-    b.spr.scale.set(s, s, 1); b.spr.material.opacity = 0.95;
-    b.light.position.set(x, y + 0.8 * scale, z); b.light.intensity = 950 * scale;
-    b.ring.visible = true; b.ring.position.set(x, 0.14, z);
+  for (const b of booms) {
+    if (b.life > 0) continue;
+    b.life = .5;
+    b.scale = scale;
+    b.spr.visible = true;
+    b.spr.position.set(x, y + .4 * scale, z);
+    const s = 7 * scale;
+    b.spr.scale.set(s, s, 1);
+    b.spr.material.opacity = .95;
+    b.light.position.set(x, y + .8 * scale, z);
+    b.light.intensity = 950 * scale;
     break;
   }
   const debris = Math.round(16 * scale);
   for (let n = 0; n < debris; n++) {
-    const a = Math.random() * Math.PI * 2; const sp = (1.5 + Math.random() * 4.5) * scale;
-    emitParticle(x, y + 0.3, z,
-      Math.cos(a) * sp, 2 + Math.random() * 5 * scale, Math.sin(a) * sp,
-      0.4 + Math.random() * 0.45, 0.05 + Math.random() * 0.07, 6.5,
-      [0xffd9a0, 0xc9a06a, 0x8a7a68][n % 3]);
+    const a = Math.random() * Math.PI * 2;
+    const sp = (1.5 + Math.random() * 4.5) * scale;
+    emit(x, y + .3, z, Math.cos(a) * sp, 2 + Math.random() * 5 * scale, Math.sin(a) * sp, .4 + Math.random() * .45, .05 + Math.random() * .07, 6.5, [0xffd9a0, 0xc9a06a, 0x8a7a68][n % 3], 1);
   }
   const ringDust = Math.max(2, Math.round(6 * scale));
   for (let n = 0; n < ringDust; n++) {
     const a = (n / ringDust) * Math.PI * 2;
-    spawnDust(x + Math.cos(a) * 1.3 * scale, 0.4, z + Math.sin(a) * 1.3 * scale, 1, 0xa89478, 1.5 * scale);
+    spawnDust(x + Math.cos(a) * 1.3 * scale, .4, z + Math.sin(a) * 1.3 * scale, 1, 0xa89478, 1.5 * scale);
   }
-  spawnDust(x, y + 0.8 * scale, z, 2, 0x6f6a63, 1.8 * scale);
+  spawnDust(x, y + .8 * scale, z, 2, 0x6f6a63, 1.8 * scale);
 }
 
-// A smoke cloud: a cluster of soft sprites that grows, hangs, and thins.
-// The matching sight-blocker entry lives in G.smokes (state.js); this is
-// only the visual half — the two are removed together.
+// Smoke: soft sprites that hang and slowly turn. The sight-blocking
+// half lives in G.smokes; this is only the visual.
 const smokeTexHolder = { tex: null };
 export function spawnSmokeVisual(scene, x, z) {
-  if (!smokeTexHolder.tex) {
-    smokeTexHolder.tex = radialTexture('rgba(198,202,208,0.55)', 'rgba(198,202,208,0)');
-  }
+  if (!smokeTexHolder.tex) smokeTexHolder.tex = glowTexture();
   const group = new THREE.Group();
   for (let i = 0; i < 10; i++) {
-    const mat = new THREE.SpriteMaterial({ map: smokeTexHolder.tex, transparent: true, depthWrite: false, opacity: 0.5 });
-    const spr = new THREE.Sprite(mat); const a = (i / 10) * Math.PI * 2;
-    spr.position.set(x + Math.cos(a) * 1.15, 0.9 + (i % 3) * 0.75, z + Math.sin(a) * 1.15);
-    spr.scale.set(3.8, 3.8, 1); group.add(spr);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTexHolder.tex, color: 0xc6cad0, transparent: true, depthWrite: false, opacity: .34 }));
+    const a = (i / 10) * Math.PI * 2;
+    spr.position.set(x + Math.cos(a) * 2.3, .9 + (i % 3) * .75, z + Math.sin(a) * 2.3);
+    spr.scale.set(3.0, 3.0, 1);
+    group.add(spr);
   }
-  group.position.set(0, 0, 0); smokeGroup.add(group);
+  (smokeGroup ?? scene).add(group);
   return group;
 }
 
 export function removeSmokeVisual(group) {
-  smokeGroup.remove(group);
+  if (smokeGroup) smokeGroup.remove(group);
 }
 
-export function chargeMeshRef() {
-  return chargeMesh;
-}
+export function chargeMeshRef() { return chargeMesh; }
 
-// The breach charge: a slab with a keypad, an antenna stub, and a light —
-// mesh and a real point light — that blinks faster as the timer runs down.
+// The breach charge: slab, keypad, antenna, and a lamp — mesh and real
+// light — that blinks faster as the timer runs down.
 export function buildChargeMesh(scene) {
   const group = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(0.46, 0.16, 0.34),
-    new THREE.MeshStandardMaterial({ color: 0x2c2f26, roughness: 0.6, metalness: 0.3 }),
-  ); body.position.y = 0.08;
-  group.add(body);
-  const pad = new THREE.Mesh(
-    new THREE.BoxGeometry(0.2, 0.03, 0.2),
-    new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.4, metalness: 0.4 }),
-  ); pad.position.set(0, 0.17, 0);
-  group.add(pad);
-  const antenna = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.012, 0.012, 0.3, 6),
-    new THREE.MeshBasicMaterial({ color: 0x0c0d10 }),
-  ); antenna.position.set(-0.18, 0.3, -0.12);
-  group.add(antenna);
-  chargeLightMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.035, 8, 8),
-    new THREE.MeshBasicMaterial({ color: 0xff2222 }),
-  ); chargeLightMesh.position.set(0.16, 0.18, 0.1);
-  group.add(chargeLightMesh); chargeLight = new THREE.PointLight(0xff3333, 0, 8, 1.8);
-  chargeLight.position.set(0, 0.35, 0); group.add(chargeLight);
-  group.visible = false; scene.add(group);
-  chargeMesh = group; return group;
+  const steel = new THREE.MeshStandardMaterial({ color: 0x2c2f26, roughness: .6, metalness: .3 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: .4, metalness: .4 });
+  const add = (geo, mat, x, y, z) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    group.add(m);
+    return m;
+  };
+  add(new THREE.BoxGeometry(.46, .16, .34), steel, 0, .08, 0);
+  add(new THREE.BoxGeometry(.2, .03, .2), dark, 0, .17, 0);
+  add(new THREE.CylinderGeometry(.012, .012, .3, 6), new THREE.MeshBasicMaterial({ color: 0x0c0d10 }), -.18, .3, -.12);
+  chargeLampMesh = add(new THREE.SphereGeometry(.035, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff2222 }), .16, .18, .1);
+  chargeLight = new THREE.PointLight(0xff3333, 0, 8, 1.8);
+  chargeLight.position.set(0, .35, 0);
+  group.add(chargeLight);
+  group.visible = false;
+  scene.add(group);
+  chargeMesh = group;
+  return group;
+}
+
+// Rain drips off hard edges: each anchor grows a bead, lets it fall,
+// and starts again on its own slow clock. Anchors come from the map.
+export function initDrips(scene, points) {
+  const n = Math.min(points.length, 48);
+  dripMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(.016, 1, .016), new THREE.MeshBasicMaterial({ color: 0x9fc4e8, transparent: true, opacity: .55 }), n);
+  dripMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  dripMesh.frustumCulled = false;
+  scene.add(dripMesh);
+  dripData = [];
+  for (let i = 0; i < n; i++) {
+    dripData.push({ x: points[i].x, y: points[i].y, z: points[i].z, phase: Math.random() * 2.4, cycle: 1.1 + Math.random() * 1.6, dropY: 0, vy: 0, falling: false });
+    _m.makeScale(0, 0, 0);
+    dripMesh.setMatrixAt(i, _m);
+  }
+}
+
+function updateDrips(dt) {
+  if (!dripMesh || !dripData) return;
+  for (let i = 0; i < dripData.length; i++) {
+    const d = dripData[i];
+    d.phase += dt;
+    if (!d.falling) {
+      const k = Math.min(1, d.phase / d.cycle);
+      const len = .05 + k * .3;
+      _v.set(d.x, d.y - len / 2, d.z);
+      _q.identity();
+      _s.set(1, len, 1);
+    } else {
+      d.vy += 16 * dt;
+      d.dropY -= d.vy * dt;
+      if (d.dropY <= .06) {
+        d.falling = false;
+        d.phase = 0;
+        d.cycle = 1.1 + Math.random() * 1.8;
+        _m.makeScale(0, 0, 0);
+        dripMesh.setMatrixAt(i, _m);
+        continue;
+      }
+      _v.set(d.x, d.dropY, d.z);
+      _q.identity();
+      _s.set(1, .24, 1);
+    }
+    _m.compose(_v, _q, _s);
+    dripMesh.setMatrixAt(i, _m);
+  }
+  dripMesh.instanceMatrix.needsUpdate = true;
 }
 
 export function updateEffects(dt) {
-  for (const t of tracerPool) {
-    if (t.life <= 0) continue; t.life -= dt;
-    if (t.life <= 0) { t.mesh.visible = false; continue; }
-    t.mesh.material.opacity = 0.95 * (t.life / t.maxLife);
+  for (const t of tracers) {
+    if (t.life <= 0) continue;
+    t.life -= dt;
+    if (t.life <= 0) { t.group.visible = false; continue; }
+    const k = t.life / t.span;
+    t.core.material.opacity = .88 * k;
+    t.halo.material.opacity = .14 * k;
   }
-  for (const f of flashPool) {
-    if (f.life <= 0) continue; f.life -= dt;
+  for (const f of flashes) {
+    if (f.life <= 0) continue;
+    f.life -= dt;
     if (f.life <= 0) f.spr.visible = false;
   }
   if (flashLight && flashLight.intensity > 0) {
-    flashLight.intensity = Math.max(0, flashLight.intensity - dt * 380);
+    flashLight.intensity *= Math.exp(-dt * 26);
+    if (flashLight.intensity < .05) flashLight.intensity = 0;
   }
-  // Dust: drift, swell, thin.
-  for (const d of dustPool) {
-    if (d.life <= 0) continue; d.life -= dt;
-    if (d.life <= 0) { d.spr.visible = false; continue; }
-    const k = 1 - d.life / d.maxLife; d.spr.position.x += d.vx * dt;
-    d.spr.position.y += d.vy * dt; d.spr.position.z += d.vz * dt;
-    const s = d.s0 + (d.s1 - d.s0) * k; d.spr.scale.set(s, s, 1);
-    d.spr.material.opacity = d.o0 * (1 - k);
+  for (const b of booms) {
+    if (b.life <= 0) continue;
+    b.life -= dt;
+    if (b.life <= 0) { b.spr.visible = false; b.light.intensity = 0; continue; }
+    const k = 1 - b.life / .5;
+    b.spr.material.opacity = .95 * Math.max(0, 1 - k * 1.6);
+    const fs = 7 * b.scale * (1 - k * .35);
+    b.spr.scale.set(fs, fs, 1);
+    b.light.intensity = 950 * b.scale * Math.max(0, 1 - k * 1.8);
   }
-  // Explosions: flash shrinks, light crashes, the ring runs out and fades.
-  for (const b of boomPool) {
-    if (b.life <= 0) continue; b.life -= dt;
-    if (b.life <= 0) {
-      b.spr.visible = false; b.ring.visible = false;
-      b.light.intensity = 0; continue;
-    }
-    const k = 1 - b.life / 0.5; b.spr.material.opacity = 0.95 * Math.max(0, 1 - k * 1.6);
-    const fs = 7 * b.scale * (1 - k * 0.35); b.spr.scale.set(fs, fs, 1);
-    b.light.intensity = 950 * b.scale * Math.max(0, 1 - k * 1.8); const rs = 0.5 + k * 8.5 * b.scale;
-    b.ring.scale.set(rs, rs, 1); b.ring.material.opacity = 0.75 * (1 - k);
-  }
-  // Particles.
-  let any = false;
-  for (let i = 0; i < PARTICLES; i++) {
-    if (pLife[i] <= 0) continue; any = true;
+  // Particles: gravity, integration, and the ground — with a skip and
+  // a bounce for the ones still carrying speed when they land.
+  let anyParticle = false;
+  for (let i = 0; i < PARTICLE_N; i++) {
+    if (pLife[i] <= 0) continue;
+    anyParticle = true;
     pLife[i] -= dt;
     if (pLife[i] <= 0) { hideParticle(i); continue; }
-    pVel[i * 3 + 1] -= pGrav[i] * dt; pPos[i * 3] += pVel[i * 3] * dt;
-    pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt; pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
-    if (pPos[i * 3 + 1] < 0.03) pPos[i * 3 + 1] = 0.03; const s = pSize[i] * (pLife[i] / pMaxLife[i]);
-    _v.set(pPos[i * 3], pPos[i * 3 + 1], pPos[i * 3 + 2]); _q.identity();
-    _s.set(s, s, s); _m.compose(_v, _q, _s);
+    pVel[i * 3 + 1] -= pGrav[i] * dt;
+    pPos[i * 3] += pVel[i * 3] * dt;
+    pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt;
+    pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
+    const floor = Math.max(.03, pSize[i] * .5);
+    if (pPos[i * 3 + 1] < floor && pVel[i * 3 + 1] < 0) {
+      if (pBounce[i] > 0) {
+        pBounce[i]--;
+        pPos[i * 3 + 1] = floor;
+        pVel[i * 3 + 1] = -pVel[i * 3 + 1] * .42;
+        pVel[i * 3] *= .65; pVel[i * 3 + 2] *= .65;
+      } else {
+        pPos[i * 3 + 1] = floor;
+        pVel[i * 3 + 1] = 0;
+      }
+    }
+    const s = pSize[i] * Math.min(1, pLife[i] / (pSpan[i] * .6));
+    _v.set(pPos[i * 3], pPos[i * 3 + 1], pPos[i * 3 + 2]);
+    _q.identity();
+    _s.set(s, s, s);
+    _m.compose(_v, _q, _s);
     particleMesh.setMatrixAt(i, _m);
   }
-  if (any || particleMesh.instanceMatrix.needsUpdate === false) {
-    particleMesh.instanceMatrix.needsUpdate = true;
+  if (anyParticle) particleMesh.instanceMatrix.needsUpdate = true;
+  // Casings: tumble, fall, bounce once, settle, fade by shrinking.
+  let anyCasing = false;
+  for (let i = 0; i < CASING_N; i++) {
+    if (cLife[i] <= 0) continue;
+    anyCasing = true;
+    cLife[i] -= dt;
+    if (cLife[i] <= 0) { hideCasing(i); continue; }
+    if (cPos[i * 3 + 1] > .03 || cVel[i * 3 + 1] > 0) {
+      cVel[i * 3 + 1] -= 9.8 * dt;
+      cPos[i * 3] += cVel[i * 3] * dt;
+      cPos[i * 3 + 1] += cVel[i * 3 + 1] * dt;
+      cPos[i * 3 + 2] += cVel[i * 3 + 2] * dt;
+      cRot[i * 3] += cSpin[i * 3] * dt;
+      cRot[i * 3 + 1] += cSpin[i * 3 + 1] * dt;
+      cRot[i * 3 + 2] += cSpin[i * 3 + 2] * dt;
+      if (cPos[i * 3 + 1] < .03 && cVel[i * 3 + 1] < 0) {
+        cPos[i * 3 + 1] = .03;
+        cVel[i * 3 + 1] = -cVel[i * 3 + 1] * .38;
+        cVel[i * 3] *= .6; cVel[i * 3 + 2] *= .6;
+        cSpin[i * 3] *= .5; cSpin[i * 3 + 1] *= .5; cSpin[i * 3 + 2] *= .5;
+        if (Math.abs(cVel[i * 3 + 1]) < .5) cVel[i * 3 + 1] = 0;
+      }
+    }
+    const s = Math.min(1, cLife[i] / .3);
+    _v.set(cPos[i * 3], cPos[i * 3 + 1], cPos[i * 3 + 2]);
+    _e.set(cRot[i * 3], cRot[i * 3 + 1], cRot[i * 3 + 2]);
+    _q.setFromEuler(_e);
+    _s.set(s, s, s);
+    _m.compose(_v, _q, _s);
+    casingMesh.setMatrixAt(i, _m);
   }
-  // Charge light blink: faster as detonation nears, and the point light
-  // breathes with it once the charge is planted.
+  if (anyCasing) casingMesh.instanceMatrix.needsUpdate = true;
+  // The charge's lamp: a blink that quickens as the timer runs down.
   if (chargeMesh && chargeMesh.visible && G.charge) {
     const planted = G.charge.state === 'planted';
     const rate = planted ? (G.charge.timer < 10 ? 9 : G.charge.timer < 25 ? 4.5 : 2.2) : 1.4;
-    const on = (G.time * rate) % 1 < 0.55; chargeLightMesh.material.color.setHex(on ? 0xff2222 : 0x551111);
+    const on = (G.time * rate) % 1 < .55;
+    chargeLampMesh.material.color.setHex(on ? 0xff2222 : 0x551111);
     if (chargeLight) chargeLight.intensity = planted && on ? 7 : 0;
   } else if (chargeLight) {
     chargeLight.intensity = 0;
   }
-  // Smoke sprites breathe slowly.
   if (smokeGroup) {
-    for (const group of smokeGroup.children) {
-      group.rotation.y += dt * 0.05;
-    }
+    for (const group of smokeGroup.children) group.rotation.y += dt * .05;
   }
+  updateDrips(dt);
 }

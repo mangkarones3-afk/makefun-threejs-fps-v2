@@ -1,61 +1,37 @@
-// state.js — the one place match state lives. Every other module reads and
-// writes through G; nothing keeps a second copy of scores, money or timers.
-// Rendering handles (scene, camera) are attached by main.js after boot.
-
-import { TIMING } from './config.js';
+// state.js — the one place the match's shared state lives. Every
+// module reads and writes through G, so a round can be reasoned about
+// (and a headless test can drive it) without chasing module variables.
 
 export const G = {
+  scene: null, camera: null, map: null, actors: [], player: null,
   phase: 'menu', // menu | buy | live | end | matchend
-  paused: false,
-  time: 0, // total simulated seconds
-  phaseTime: 0, // seconds left in the timed phase
-  round: 0,
-  scores: { atk: 0, def: 0 },
-  lossStreak: { atk: 0, def: 0 },
-  targetSite: 'A', // site the attackers push this round
-  actors: [],
-  player: null,
-  charge: null, // filled by resetCharge()
-  grenades: [], // live grenade entities
-  smokes: [], // smoke clouds { x, z, r, until }
-  noises: [], // recent gunfire { x, z, team, at, radius }
-  feed: [], // killfeed entries { text, at }
-  winner: null, // team id that won the current round
-  winHow: '', // elimination | detonation | defuse | timeout
-  matchWinner: null,
-  interactor: null, // actor planting or defusing now
-  interactKind: '', // 'plant' | 'defuse'
-  interactT: 0, // channel progress in seconds
-  shot: null, // staging request { mode, seed } or null
-  shake: 0, // camera shake, decays in player.js
-  hitStop: 0, // frozen-sim seconds left (kill feedback)
-  lastKill: null, // latest player kill { name, part, at }
-  flashTime: 0, // flashbang blindness seconds left
-  events: [], // gameplay events for rounds.js { type, ... }
-  scene: null,
-  camera: null,
-  map: null,
+  phaseTime: 0, time: 0, round: 0,
+  // Round-timing mirrors of config's TIMING, read all over the sim.
+  buyPhase: 12, roundLive: 100, chargeTimer: 40, plantTime: 3.5,
+  defuseTime: 5, roundEnd: 5, firstTo: 8,
+  scores: { atk: 0, def: 0 }, lossStreak: { atk: 0, def: 0 },
+  winner: null, winHow: '', matchWinner: null, targetSite: 'A',
+  charge: null, // { state, carrier, x, z, site, timer }
+  interactor: null, interactKind: '', interactT: 0,
+  grenades: [], smokes: [], noises: [], events: [], feed: [],
+  // Presentation beats, written by weapons/feedback, read by player/hud.
+  shake: 0, hitStop: 0, hitMarkAt: -9, killMarkAt: -9, lastKill: null,
+  flashTime: 0, damageFlash: 0,
+  paused: false, shot: null,
 };
 
 export function resetCharge() {
-  G.charge = {
-    state: 'carried', // carried | dropped | planted | done
-    carrier: null,
-    x: 0, z: 0, // ground position when dropped/planted
-    site: null,
-    timer: TIMING.chargeTimer,
-  };
-  G.interactor = null; G.interactKind = '';
-  G.interactT = 0;
+  G.charge = { state: 'carried', carrier: null, x: 0, z: 0, site: null, timer: 0 };
 }
 
 export function aliveCount(team) {
-  let n = 0; for (const a of G.actors) if (a.team === team && a.alive) n++;
+  let n = 0;
+  for (const a of G.actors) if (a.team === team && a.alive) n++;
   return n;
 }
 
-// A gunshot others can hear: bots investigate noises from the other team.
+// A gunshot the bots can hear. Entries age out after a few seconds.
 export function makeNoise(x, z, team, radius = 26) {
-  G.noises.push({ x, z, team, at: G.time, radius });
+  G.noises.push({ x, z, team, radius, at: G.time });
   if (G.noises.length > 24) G.noises.shift();
 }

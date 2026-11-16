@@ -1,13 +1,18 @@
-// A small static file server for developing and screenshotting the game:
+// serve.ts — a small static file server for developing and
+// screenshotting the game:
+//
 //   node serve.ts [--port 8080]
-// serves game/ on http://localhost:8080. Standard library only. Paths are
-// confined to game/; anything outside it is refused.
+//
+// serves game/ on http://localhost:8080. Standard library only. Every
+// path is confined to game/; anything that climbs out is refused.
+
 import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const gameDir = resolve(fileURLToPath(new URL('./game', import.meta.url)));
+
 const argv = process.argv.slice(2);
 const at = argv.indexOf('--port');
 const wanted = at === -1 ? 8080 : Number(argv[at + 1]);
