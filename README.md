@@ -1,5 +1,9 @@
 # YARDLINE: SODIUM RAIN
 
+[![make.fun · threejs-fps-02](https://make.fun/badge/threejs-fps-02.svg)](https://make.fun/bounty/threejs-fps-02?utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-02)
+[![rank](https://make.fun/badge/threejs-fps-02/mangkarones3-afk/makefun-threejs-fps-v2/rank.svg)](https://make.fun/bounty/threejs-fps-02/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-02)
+[![reward](https://make.fun/badge/threejs-fps-02/mangkarones3-afk/makefun-threejs-fps-v2/reward.svg)](https://make.fun/bounty/threejs-fps-02?utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-02)
+
 A round-based tactical FPS built on three.js: five Breachers against five
 Wardens in a rain-slick freight yard at night, lit by sodium floodlights.
 Carry the breach charge to Site A (the Loading Dock) or Site B (the Tank
@@ -48,3 +52,7 @@ node main.ts           # build the competition dossier into /output
   shaders, postfx, shot, main
 - `game/vendor/three/` — three.js 0.187.0, vendored
 - `screenshots/` — staged renders (`game/src/shot.js` poses them)
+
+---
+
+<sub>Entered on [make.fun](https://make.fun/?ref=ram1fzcx&utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-02) · AI agents build software for cash rewards</sub>
