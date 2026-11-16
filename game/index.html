@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YARDLINE: SODIUM RAIN — a three.js tactical FPS</title>
+<style>
+:root{--canvas:#0c0f16;--surface:#161b24;--hairline:#2e3644;--ink:#f2ecdd;--muted:#9aa7b4;--amber:#f09a3e;--gold:#ffc37a;--blue:#7db1e8;--red:#e5484d;--green:#a8d69e;--font-ui:system-ui, -apple-system, 'Segoe UI', sans-serif;--font-readout:ui-monospace, 'SF Mono', Menlo, monospace;}
+*{box-sizing:border-box;}
+html, body{margin:0;height:100%;overflow:hidden;background:var(--canvas);color:var(--ink);font-family:var(--font-ui);}
+#game, #game canvas{position:fixed;inset:0;display:block;}
+#hud{position:fixed;inset:0;pointer-events:none;visibility:hidden;}
+#topbar{position:fixed;top:14px;left:50%;transform:translateX(-50%);text-align:center;text-shadow:0 2px 8px rgba(0,0,0,0.8);}
+#timer{font-family:var(--font-readout);font-size:36px;font-weight:600;line-height:1;letter-spacing:0.04em;}
+#timer.urgent{color:var(--red);animation:urgent-pulse 0.9s ease-in-out infinite;}
+@keyframes urgent-pulse{0%, 100%{transform:scale(1);}50%{transform:scale(1.09);}}
+#phase-name{font-size:11px;letter-spacing:0.34em;color:var(--gold);margin-top:4px;}
+#scoreline{margin-top:6px;font-family:var(--font-readout);font-size:15px;color:var(--muted);}
+#scoreline .atk{color:var(--amber);font-size:20px;font-weight:600;}
+#scoreline .def{color:var(--blue);font-size:20px;font-weight:600;}
+#round-num{margin-left:10px;}
+#alive-line{font-size:11px;color:var(--muted);margin-top:2px;letter-spacing:0.08em;}
+#objective{position:fixed;top:16px;left:20px;max-width:300px;font-size:13px;line-height:1.45;color:var(--ink);text-shadow:0 1px 3px #000;background:linear-gradient(90deg, rgba(10,12,18,0.55), rgba(10,12,18,0));border-left:3px solid var(--amber);padding:7px 12px 7px 10px;}
+#feed{position:fixed;top:16px;right:20px;text-align:right;font-family:var(--font-readout);font-size:12.5px;color:var(--ink);text-shadow:0 1px 3px #000;display:grid;gap:3px;}
+#feed .feed-in{background:linear-gradient(-90deg, rgba(10,12,18,0.55), rgba(10,12,18,0));padding:3px 8px 3px 14px;animation:feed-in 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2);}
+@keyframes feed-in{from{opacity:0;transform:translateX(18px);}to{opacity:1;transform:none;}}
+#vitals{position:fixed;left:24px;bottom:22px;width:230px;text-shadow:0 2px 6px rgba(0,0,0,0.7);}
+#health-row{display:flex;align-items:baseline;gap:10px;}
+#health-num{font-family:var(--font-readout);font-size:42px;font-weight:600;line-height:1;}
+#money-num{font-family:var(--font-readout);font-size:17px;color:var(--green);}
+.bar{height:8px;background:rgba(255,255,255,0.14);margin-top:6px;box-shadow:0 1px 4px rgba(0,0,0,0.5);}
+.bar > div{height:100%;background:linear-gradient(90deg, #d8d2c2, var(--ink));width:100%;transition:width 120ms linear;}
+#armor-wrap{height:5px;}
+#armor-fill{background:linear-gradient(90deg, #4a76a8, var(--blue));}
+#weaponbox{position:fixed;right:24px;bottom:22px;text-align:right;text-shadow:0 2px 6px rgba(0,0,0,0.7);}
+#weapon-name{font-size:13px;letter-spacing:0.18em;color:var(--gold);text-transform:uppercase;}
+#ammo-line{font-family:var(--font-readout);display:flex;align-items:baseline;gap:8px;justify-content:flex-end;}
+#ammo-mag{font-size:54px;font-weight:600;line-height:1;}
+#ammo-mag.low{color:var(--red);}
+#ammo-res{font-size:16px;color:var(--muted);}
+#grenade-icons{font-size:12px;color:var(--muted);margin-top:4px;font-family:var(--font-readout);}
+#crosshair{position:fixed;left:50%;top:50%;--sp:10px;filter:drop-shadow(0 0 3px rgba(0,0,0,0.9));}
+#crosshair i{position:absolute;background:var(--ink);opacity:0.92;}
+#crosshair i:nth-child(1){width:2px;height:7px;transform:translate(-1px, calc(-7px - var(--sp)));}
+#crosshair i:nth-child(2){width:2px;height:7px;transform:translate(-1px, var(--sp));}
+#crosshair i:nth-child(3){width:7px;height:2px;transform:translate(calc(-7px - var(--sp)), -1px);}
+#crosshair i:nth-child(4){width:7px;height:2px;transform:translate(var(--sp), -1px);}
+#crosshair i:nth-child(5){width:2px;height:2px;transform:translate(-1px, -1px);background:var(--amber);}
+#hitmarker{position:fixed;left:50%;top:50%;width:26px;height:26px;transform:translate(-50%, -50%) rotate(45deg);opacity:0;}
+#hitmarker.on{opacity:1;}
+#hitmarker i{position:absolute;background:var(--ink);box-shadow:0 0 4px rgba(0,0,0,0.8);}
+#hitmarker.kill i{background:var(--red);}
+#hitmarker i:nth-child(1){left:12px;top:0;width:2px;height:8px;}
+#hitmarker i:nth-child(2){left:12px;bottom:0;width:2px;height:8px;}
+#hitmarker i:nth-child(3){top:12px;left:0;height:2px;width:8px;}
+#hitmarker i:nth-child(4){top:12px;right:0;height:2px;width:8px;}
+#hurt-dir{position:fixed;left:50%;top:50%;width:170px;height:170px;opacity:0;pointer-events:none;}
+#hurt-dir i{position:absolute;left:50%;top:0;transform:translateX(-50%);width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:17px solid var(--red);filter:drop-shadow(0 0 5px rgba(229,72,77,0.8));}
+#vignette{position:fixed;inset:0;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center, transparent 52%, rgba(190, 20, 20, 0.5) 100%);}
+#vignette.lowhp{animation:lowhp-pulse 1.05s ease-in-out infinite;}
+@keyframes lowhp-pulse{0%, 100%{opacity:0.38;}50%{opacity:0.85;}}
+#flash{position:fixed;inset:0;pointer-events:none;opacity:0;background:#fff;}
+#banner{position:fixed;top:24%;left:50%;transform:translateX(-50%);text-align:center;pointer-events:none;}
+#banner.pop{animation:banner-pop 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.15);}
+@keyframes banner-pop{from{opacity:0;transform:translateX(-50%) scale(0.9);}to{opacity:1;transform:translateX(-50%) scale(1);}}
+#banner-title{font-size:42px;font-weight:700;letter-spacing:0.05em;text-shadow:0 2px 14px rgba(0,0,0,0.85), 0 0 34px rgba(240,154,62,0.25);}
+#banner-sub{font-size:15px;color:var(--gold);margin-top:4px;text-shadow:0 1px 4px #000;letter-spacing:0.06em;}
+#kill-banner{position:fixed;top:35%;left:50%;transform:translateX(-50%);text-align:center;pointer-events:none;opacity:0;}
+#kill-banner.show{animation:kill-in 1.15s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;}
+@keyframes kill-in{0%{opacity:0;transform:translateX(-50%) scale(1.35);}12%{opacity:1;transform:translateX(-50%) scale(1);}78%{opacity:1;}100%{opacity:0;transform:translateX(-50%) scale(0.98);}}
+#kill-title{font-size:31px;font-weight:700;letter-spacing:0.3em;color:var(--amber);text-shadow:0 2px 12px rgba(0,0,0,0.9), 0 0 26px rgba(240,154,62,0.45);}
+#kill-sub{font-size:14px;letter-spacing:0.14em;color:var(--ink);margin-top:3px;text-shadow:0 1px 4px #000;}
+#interact{position:fixed;left:50%;bottom:24%;transform:translateX(-50%);width:280px;text-align:center;}
+#interact-label{font-size:13px;letter-spacing:0.16em;margin-bottom:6px;text-shadow:0 1px 4px #000;}
+#interact-track{height:6px;background:rgba(255,255,255,0.18);}
+#interact-fill{height:100%;width:0;background:linear-gradient(90deg, var(--amber), var(--gold));box-shadow:0 0 8px rgba(240,154,62,0.7);}
+#buy-menu{position:fixed;top:70px;right:20px;width:312px;background:linear-gradient(165deg, rgba(26,32,42,0.94), rgba(15,18,25,0.94));border:1px solid var(--hairline);border-top:3px solid var(--amber);padding:14px;pointer-events:auto;box-shadow:0 14px 40px rgba(0,0,0,0.55);animation:menu-in 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.1);}
+@keyframes menu-in{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:none;}}
+#buy-menu h2{margin:0 0 2px;font-size:15px;letter-spacing:0.16em;font-weight:700;}
+#buy-menu .sub{font-size:12px;color:var(--muted);margin-bottom:10px;}
+#buy-money{color:var(--green);font-family:var(--font-readout);}
+#buy-grid{display:grid;gap:6px;}
+.buy-item{display:flex;align-items:center;gap:9px;font:inherit;font-size:13.5px;text-align:left;padding:8px 9px;background:rgba(255,255,255,0.04);color:var(--ink);border:1px solid var(--hairline);cursor:pointer;transition:transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;}
+.buy-item:hover{border-color:var(--amber);background:rgba(240,154,62,0.10);transform:translateX(-3px);}
+.buy-key{font-family:var(--font-readout);font-size:11px;border:1px solid var(--hairline);padding:1px 5px;color:var(--gold);}
+.buy-name{flex:1;}
+.buy-price{font-family:var(--font-readout);color:var(--green);}
+.buy-item.owned{opacity:0.45;}
+.buy-item.poor .buy-price{color:var(--red);}
+.overlay{position:fixed;inset:0;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at 50% 42%, rgba(12,15,22,0.42), rgba(12,15,22,0.82));pointer-events:auto;}
+.overlay[hidden]{display:none;}
+.panel{width:min(540px, 100%);padding:32px 36px;background:linear-gradient(160deg, rgba(27,33,44,0.96), rgba(15,18,25,0.97));border:1px solid var(--hairline);border-top:3px solid var(--amber);box-shadow:0 24px 70px rgba(0,0,0,0.65);animation:panel-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.08);}
+@keyframes panel-in{from{opacity:0;transform:translateY(16px) scale(0.985);}to{opacity:1;transform:none;}}
+.panel h1{margin:0;font-size:42px;font-weight:750;letter-spacing:0.05em;}
+.panel h1 .amber{color:var(--amber);}
+.panel .edition{font-size:12px;letter-spacing:0.52em;color:var(--gold);margin:2px 0 12px;}
+.panel p{margin:0 0 14px;font-size:14.5px;line-height:1.55;color:var(--muted);}
+.panel .big-btn{font:inherit;font-size:16px;font-weight:700;letter-spacing:0.04em;padding:13px 26px;border:1px solid var(--amber);background:linear-gradient(180deg, var(--gold), var(--amber) 55%, #d97c26);color:#1a130a;cursor:pointer;box-shadow:0 6px 22px rgba(240,154,62,0.35);transition:transform 0.13s ease, box-shadow 0.13s ease, filter 0.13s ease;}
+.panel .big-btn:hover{filter:brightness(1.1);transform:translateY(-2px);box-shadow:0 10px 28px rgba(240,154,62,0.45);}
+.keys{margin:18px 0 0;padding:0;list-style:none;display:grid;gap:6px;font-size:13px;color:var(--muted);}
+.keys li{display:flex;gap:8px;align-items:center;}
+kbd{min-width:23px;padding:2px 6px;border:1px solid var(--hairline);border-bottom-width:2px;background:rgba(255,255,255,0.05);font-family:var(--font-readout);font-size:11.5px;color:var(--ink);text-align:center;}
+#end-stats table, #sb-body{border-collapse:collapse;}
+#end-stats td{padding:2px 12px 2px 0;font-size:13.5px;color:var(--muted);}
+#scoreboard{position:fixed;top:12%;left:50%;transform:translateX(-50%);background:linear-gradient(165deg, rgba(26,32,42,0.95), rgba(15,18,25,0.95));border:1px solid var(--hairline);border-top:3px solid var(--amber);padding:16px 22px;pointer-events:none;box-shadow:0 14px 40px rgba(0,0,0,0.55);}
+#scoreboard table{border-collapse:collapse;font-size:14px;}
+#scoreboard th, #scoreboard td{padding:4px 14px;text-align:left;}
+#scoreboard th{color:var(--muted);font-weight:500;font-size:12px;letter-spacing:0.1em;}
+#scoreboard tr.atk td:first-child{color:var(--amber);}
+#scoreboard tr.def td:first-child{color:var(--blue);}
+#scoreboard tr.dead{opacity:0.45;}
+#click-aim{position:fixed;left:50%;bottom:12%;transform:translateX(-50%);font-size:15px;letter-spacing:0.1em;color:var(--ink);background:rgba(0,0,0,0.55);border:1px solid var(--hairline);padding:9px 18px;pointer-events:auto;cursor:pointer;animation:urgent-pulse 1.6s ease-in-out infinite;}
+</style>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="hud">
+  <div id="topbar">
+    <div id="timer">0:00</div>
+    <div id="phase-name">MENU</div>
+    <div id="scoreline"><span style="color:var(--amber)">BR</span> <span class="atk" id="sc-atk">0</span> : <span class="def" id="sc-def">0</span> <span style="color:var(--blue)">WA</span><span id="round-num">Round 1</span></div>
+    <div id="alive-line"></div>
+  </div>
+  <div id="objective"></div>
+  <div id="feed"></div>
+
+  <div id="vitals">
+    <div id="health-row"><span id="health-num">100</span><span id="money-num">$800</span></div>
+    <div class="bar"><div id="health-fill"></div></div>
+    <div class="bar" id="armor-wrap"><div id="armor-fill"></div></div>
+  </div>
+
+  <div id="weaponbox">
+    <div id="weapon-name">P9 Sidearm</div>
+    <div id="ammo-line"><span id="ammo-mag">12</span><span id="ammo-res">/ 96</span></div>
+    <div id="grenade-icons"></div>
+  </div>
+
+  <div id="crosshair"><i></i><i></i><i></i><i></i><i></i></div>
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+  <div id="hurt-dir"><i></i></div>
+  <div id="banner" hidden><div id="banner-title"></div><div id="banner-sub"></div></div>
+  <div id="kill-banner" hidden><div id="kill-title"></div><div id="kill-sub"></div></div>
+  <div id="interact" hidden><div id="interact-label">Planting the charge…</div><div id="interact-track"><div id="interact-fill"></div></div></div>
+</div>
+<div id="vignette"></div>
+<div id="flash"></div>
+
+<aside id="buy-menu" hidden>
+  <h2>BUY MENU</h2>
+  <div class="sub">Your money: <span id="buy-money">$800</span> — keys 1–0 buy, the round starts when the timer ends.</div>
+  <div id="buy-grid"></div>
+</aside>
+
+<div id="scoreboard" hidden>
+  <table>
+    <thead><tr><th>Player</th><th>Team</th><th>K</th><th>D</th><th>Money</th></tr></thead>
+    <tbody id="sb-body"></tbody>
+  </table>
+</div>
+
+<div id="click-aim" hidden>Click to take aim</div>
+
+<div id="menu-start" class="overlay">
+  <section class="panel">
+    <h1>YARD<span class="amber">LINE</span></h1>
+    <div class="edition">SODIUM RAIN</div>
+    <p>A round-based tactical shooter in a rain-slick freight yard at night, lit by sodium floodlights. You lead the <b style="color:var(--amber)">Breachers</b>: carry the breach charge to Site A (the Loading Dock) or Site B (the Tank Farm), plant it, and hold — or wipe out the <b style="color:var(--blue)">Wardens</b> first. Win rounds, earn money, buy better guns. First team to 8 rounds takes the yard.</p>
+    <p>Accuracy beats speed: stop moving to shoot straight, crouch to steady, and mind the headshot.</p>
+    <button id="btn-play" class="big-btn" type="button">Play</button>
+    <ul class="keys">
+      <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move &nbsp; <kbd>Mouse</kbd> Look &nbsp; <kbd>Click</kbd> Fire</li>
+      <li><kbd>R</kbd> Reload &nbsp; <kbd>1</kbd>/<kbd>2</kbd> Weapons &nbsp; <kbd>4</kbd> Throw grenade &nbsp; <kbd>Wheel</kbd> Swap</li>
+      <li><kbd>Ctrl</kbd> Crouch &nbsp; <kbd>Shift</kbd> Walk &nbsp; <kbd>Space</kbd> Jump &nbsp; <kbd>E</kbd> Plant (hold) &nbsp; <kbd>Tab</kbd> Scores</li>
+    </ul>
+  </section>
+</div>
+
+<div id="pause-menu" class="overlay" hidden>
+  <section class="panel">
+    <h1>Paused</h1>
+    <p>The round is waiting. Jump back in when you are ready.</p>
+    <button id="btn-resume" class="big-btn" type="button">Resume</button>
+  </section>
+</div>
+
+<div id="menu-end" class="overlay" hidden>
+  <section class="panel">
+    <h1 id="end-title">Match over</h1>
+    <div id="end-stats"></div>
+    <button id="btn-again" class="big-btn" type="button">Play again</button>
+  </section>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
