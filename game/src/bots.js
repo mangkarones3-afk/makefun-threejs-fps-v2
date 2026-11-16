@@ -1,9 +1,4 @@
-// bots.js — the bot brain: perception (sight with line of sight and
-// smoke, hearing gunfire), a waypoint path follower, and a job per
-// role — push, hold, roam, plant, defuse, retake, investigate. Bots
-// fire through the same weapons.js rules as the player; their only
-// edge is patience, their only handicap the reaction delay and aim
-// error written into them here.
+// bots.js — the bot brain: perception, plans, fire control.
 
 import { MOVE } from './config.js';
 import { G } from './state.js';

@@ -1,8 +1,4 @@
-// physics.js — collision and ray queries against the yard's box
-// colliders. Everything here is allocation-free: callers pass scratch
-// objects, results come back as numbers or through an out parameter.
-// Colliders are { x0, z0, x1, z1, h }: a footprint on the ground plane
-// and a height, which is all a yard of containers and walls needs.
+// physics.js — collision and ray queries against the yard's boxes.
 
 export function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
@@ -32,10 +28,8 @@ export function moveCircle(pos, dx, dz, r, colliders) {
   }
 }
 
-// Slab test of a ray against a box given by centre and half extents.
-// Returns the entry distance, or Infinity when the ray misses (or the
-// box lies wholly behind the origin). Written out per axis: this is
-// the hottest query in the game and stays allocation-free.
+// Slab test of a ray against a box (centre + half extents): the entry
+// distance, or Infinity on a miss. The game's hottest query; no allocs.
 export function rayBox(ox, oy, oz, dx, dy, dz, cx, cy, cz, hx, hy, hz) {
   let tmin = 0;
   let tmax = Infinity;

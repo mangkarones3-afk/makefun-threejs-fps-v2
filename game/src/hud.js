@@ -1,10 +1,5 @@
-// hud.js — everything drawn in the DOM: the HUD (health, armour,
-// money, ammo, timer, scores), the crosshair that breathes with the
-// spread cone, hit and hurt feedback, the killfeed, phase banners, the
-// buy menu and the menus. Text writes are cached: the
-// DOM is touched on change only. The hurt vignette reads
-// G.damageFlash, which feedback.js fills under a hard cap of three
-// full flashes per second — the HUD never flashes faster than that.
+// hud.js — everything drawn in the DOM: HUD, crosshair, killfeed,
+// radio, minimap, banners, buy menu and menus. DOM writes are cached.
 
 import { TIMING, WEAPONS, GEAR, BUY_ORDER } from './config.js';
 import { G, aliveCount } from './state.js';
@@ -37,7 +32,7 @@ let lastHitMarkAt = -9;
 let lastKillMarkAt = -9;
 
 // Element handles, keyed by camelCased id, with four renames.
-const EL_IDS = 'hud crosshair hitmarker health-fill health-num armor-fill weapon-name ammo-mag ammo-res timer phase-name sc-atk sc-def round-num alive-line feed banner banner-title banner-sub kill-banner kill-title kill-sub interact interact-fill interact-label objective vignette flash hurt-dir buy-menu buy-grid buy-money menu-start menu-end end-title end-stats pause-menu click-aim';
+const EL_IDS = 'hud crosshair hitmarker health-fill health-num armor-fill weapon-name ammo-mag ammo-res timer phase-name sc-atk sc-def round-num alive-line feed minimap radio banner banner-title banner-sub kill-banner kill-title kill-sub interact interact-fill interact-label objective vignette flash hurt-dir buy-menu buy-grid buy-money menu-start menu-end end-title end-stats pause-menu click-aim';
 
 export function initHud({ onPlay, onResume, onAgain }) {
   els = {};
@@ -276,11 +271,110 @@ export function updateHud() {
     els.interact.hidden = true;
   }
 
-  // Killfeed: rebuild only when its contents change; entries slide in.
-  const feedText = G.feed.filter((f) => G.time - f.at < 5.5).map((f) => f.text).join('\n');
-  if (cache.get('feed') !== feedText) {
-    cache.set('feed', feedText);
-    els.feed.innerHTML = feedText.split('\n').filter(Boolean).map((t) => `<div class="feed-in">${t}</div>`).join('');
+  // Killfeed: rebuilt when its entries change, then each line fades
+  // with age. A kill names its attacker, weapon and victim, coloured
+  // by team; the plain lines are the charge's own news.
+  const live = G.feed.filter((f) => G.time - f.at < 5.5);
+  const feedSig = live.map((f) => f.at).join(',');
+  if (cache.get('feed') !== feedSig) {
+    cache.set('feed', feedSig);
+    els.feed.innerHTML = live.map((f) => f.kill
+      ? `<div class="feed-in"><span class="${f.aTeam}">${f.aName}</span> <span class="fw">${f.weapon}</span> ▸ <span class="${f.vTeam}">${f.vName}</span>${f.head ? ' (headshot)' : ''}</div>`
+      : `<div class="feed-in">${f.text}</div>`).join('');
+  }
+  [...els.feed.children].forEach((el, i) => {
+    el.style.opacity = String(Math.max(0, 1.1 - (G.time - live[i].at) / 5.5));
+  });
+
+  // Radio: the last two callouts, fading over six seconds.
+  const rl = G.radio.filter((r) => G.time - r.at < 6).slice(-2);
+  const rSig = rl.map((r) => r.at).join(',');
+  if (cache.get('radio') !== rSig) {
+    cache.set('radio', rSig);
+    els.radio.innerHTML = rl.map((r) => `<div>${r.text}</div>`).join('');
+  }
+  [...els.radio.children].forEach((el, i) => {
+    el.style.opacity = String(Math.max(.15, 1 - (G.time - rl[i].at) / 6));
+  });
+
+  drawMinimap();
+}
+
+// The minimap: the yard schematic, redrawn a few times a second. The
+// static layer (colliders, sites) is painted once offscreen; each pass
+// blits it and adds the player arrow, living Breacher dots, fading
+// Warden-gunfire pings and the dropped charge as a diamond.
+let mapBase = null;
+let mapAt = -9;
+function drawMinimap() {
+  const cv = els?.minimap;
+  if (!cv || !G.map || G.time - mapAt < .12) return;
+  mapAt = G.time;
+  const W = cv.width, H = cv.height;
+  const px = (x) => (x + 40) / 80 * W, pz = (z) => (z + 30) / 60 * H;
+  if (!mapBase) {
+    mapBase = document.createElement('canvas');
+    mapBase.width = W;
+    mapBase.height = H;
+    const b = mapBase.getContext('2d');
+    b.fillStyle = 'rgba(10,13,19,.88)';
+    b.fillRect(0, 0, W, H);
+    for (const key of ['A', 'B']) {
+      const s = G.map.sites[key];
+      b.fillStyle = key === 'A' ? 'rgba(240,154,62,.22)' : 'rgba(125,177,232,.22)';
+      b.fillRect(px(s.x0), pz(s.z0), (s.x1 - s.x0) / 80 * W, (s.z1 - s.z0) / 60 * H);
+      b.fillStyle = '#f0ead8';
+      b.font = 'bold 11px ui-monospace, Menlo, monospace';
+      b.fillText(key, px(s.cx) - 3, pz(s.cz) + 4);
+    }
+    b.fillStyle = 'rgba(240,234,216,.32)';
+    for (const c of G.map.colliders) {
+      if (c.h < .6) continue;
+      b.fillRect(px(c.x0), pz(c.z0), Math.max(1.5, (c.x1 - c.x0) / 80 * W), Math.max(1.5, (c.z1 - c.z0) / 60 * H));
+    }
+  }
+  const g = cv.getContext('2d');
+  g.drawImage(mapBase, 0, 0);
+  for (const n of G.noises) {
+    if (n.team !== 'def') continue;
+    const age = G.time - n.at;
+    if (age > 3.5) continue;
+    g.globalAlpha = 1 - age / 3.5;
+    g.fillStyle = '#7db1e8';
+    g.beginPath();
+    g.arc(px(n.x), pz(n.z), 3, 0, 7);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+  g.fillStyle = '#f09a3e';
+  for (const a of G.actors) {
+    if (!a.alive || a.isPlayer || a.team !== 'atk') continue;
+    g.beginPath();
+    g.arc(px(a.pos.x), pz(a.pos.z), 2.6, 0, 7);
+    g.fill();
+  }
+  const c = G.charge;
+  if (c && c.state !== 'carried') {
+    g.save();
+    g.translate(px(c.x), pz(c.z));
+    g.rotate(Math.PI / 4);
+    g.fillStyle = '#ffc37a';
+    g.fillRect(-2.6, -2.6, 5.2, 5.2);
+    g.restore();
+  }
+  const p = G.player;
+  if (p?.alive) {
+    g.save();
+    g.translate(px(p.pos.x), pz(p.pos.z));
+    g.rotate(-p.yaw);
+    g.fillStyle = '#ffc37a';
+    g.beginPath();
+    g.moveTo(0, -5.5);
+    g.lineTo(3.6, 4.2);
+    g.lineTo(-3.6, 4.2);
+    g.closePath();
+    g.fill();
+    g.restore();
   }
 }
 

@@ -1,9 +1,4 @@
-// effects.js — every short-lived visual, pooled at boot and recycled
-// forever: tracers with a glowing halo, muzzle flashes with one shared
-// light, impact sparks that fall and bounce, debris, dust, ejecting
-// shell casings, rain drips, smoke, explosions and the breach charge.
-// The hot loop allocates nothing; per-particle data lives in flat
-// arrays, never in objects.
+// effects.js — every short-lived visual, pooled at boot.
 
 import * as THREE from 'three';
 import { G } from './state.js';

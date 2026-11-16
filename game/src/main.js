@@ -1,11 +1,5 @@
-// main.js — boot and the frame loop. The simulation runs at a fixed
-// 60 Hz step fed by an accumulator; rendering happens whenever the
-// browser paints; the two never mix — a slow frame runs more steps,
-// never a bigger step. Two presentation systems ride on the loop
-// without touching the step size: hit-stop (feedback.js) scales the
-// accumulator's feed to 5% for a few real-time frames on a kill, and a
-// slow-motion beat at 35% closes out each round. Trauma decays in real
-// time throughout, so the camera settles even while the world freezes.
+// main.js — boot and the frame loop: a fixed 60 Hz simulation fed
+// by an accumulator; rendering never changes the step size.
 
 import * as THREE from 'three';
 import { G } from './state.js';
@@ -184,8 +178,7 @@ function boot() {
 }
 
 // In the staged play shot the posed actors never pull their triggers,
-// so the firefight is dressed by hand: alternating bursts between the
-// lead Warden and the player, dressed again right before each render.
+// so the firefight is dressed by hand with alternating bursts.
 let fxTimer = 0;
 let fxAlt = false;
 let fxBoom = 1.4;

@@ -1,8 +1,4 @@
-// weapons.js — weapon instances and everything a shot does: spread
-// and recoil that punish firing on the move, range falloff, headshot
-// damage, tracers, an ejected casing for every round, noise for the
-// bots to hear, and the three grenade kinds. One WeaponInst per actor
-// slot; player and bots share the firing maths exactly.
+// weapons.js — weapon instances and everything a shot does.
 
 import * as THREE from 'three';
 import { WEAPONS } from './config.js';

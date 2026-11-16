@@ -1,8 +1,4 @@
-// textures.js — the yard wears no image files. Every surface is
-// painted at boot on a canvas with a seeded random source, so the same
-// yard renders on every machine: ribbed container steel with stencils
-// and rust, cast concrete, silo plate, a lit skyline, the night sky
-// itself, and the soft sprites the effects are built from.
+// textures.js — every surface is painted on canvases at boot.
 
 import * as THREE from 'three';
 

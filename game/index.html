@@ -25,8 +25,14 @@ html, body{margin:0;height:100%;overflow:hidden;background:var(--canvas);color:v
 #scoreline .def{color:var(--blue);font-size:19px;font-weight:600;}
 #round-num{margin-left:10px;}
 #alive-line{font-size:11px;color:var(--dim);margin-top:2px;letter-spacing:.07em;}
-#objective{position:fixed;top:16px;left:18px;max-width:290px;font-size:13px;line-height:1.5;text-shadow:0 1px 3px #000;background:rgba(9,11,17,.55);border-left:3px solid var(--amber);padding:7px 12px 7px 10px;}
+#minimap{position:fixed;top:14px;left:16px;border:1px solid var(--line);box-shadow:0 4px 18px rgba(0,0,0,.5);}
+#objective{position:fixed;top:134px;left:18px;max-width:290px;font-size:13px;line-height:1.5;text-shadow:0 1px 3px #000;background:rgba(9,11,17,.55);border-left:3px solid var(--amber);padding:7px 12px 7px 10px;}
+#radio{position:fixed;top:196px;left:18px;font-family:var(--mono);font-size:11.5px;color:var(--gold);text-shadow:0 1px 3px #000;display:grid;gap:2px;}
+#radio div{background:rgba(9,11,17,.45);border-left:2px solid var(--gold);padding:2px 8px 2px 6px;}
 #feed{position:fixed;top:16px;right:18px;text-align:right;font-family:var(--mono);font-size:12.5px;text-shadow:0 1px 3px #000;display:grid;gap:3px;}
+#feed .atk{color:var(--amber);}
+#feed .def{color:var(--blue);}
+#feed .fw{color:var(--dim);}
 #feed .feed-in{background:rgba(9,11,17,.5);padding:3px 8px 3px 14px;animation:feed-in .28s cubic-bezier(.2,.9,.3,1.2);}
 @keyframes feed-in{from{opacity:0;transform:translateX(16px);}to{opacity:1;transform:none;}}
 #vitals{position:fixed;left:22px;bottom:20px;width:224px;text-shadow:0 2px 6px rgba(0,0,0,.7);}
@@ -123,7 +129,9 @@ kbd{min-width:23px;padding:2px 6px;border:1px solid var(--line);border-bottom-wi
     <div id="scoreline"><span style="color:var(--amber)">BR</span> <span class="atk" id="sc-atk">0</span> : <span class="def" id="sc-def">0</span> <span style="color:var(--blue)">WA</span><span id="round-num">Round 1</span></div>
     <div id="alive-line"></div>
   </div>
+  <canvas id="minimap" width="144" height="108"></canvas>
   <div id="objective"></div>
+  <div id="radio"></div>
   <div id="feed"></div>
 
   <div id="vitals">

@@ -1,8 +1,4 @@
-// actors.js — the Actor: the one body the player and every bot share.
-// Position and velocity, health and armour, the held weapons, movement
-// with acceleration and wall collision, hit tests (a head sphere over
-// a body box) and damage with armour soak. Brains and hands only steer
-// an Actor; the rules of being shot live here.
+// actors.js — the Actor: body, health, weapons, movement, hit tests, damage.
 
 import * as THREE from 'three';
 import { MOVE, TEAMS, ECONOMY } from './config.js';

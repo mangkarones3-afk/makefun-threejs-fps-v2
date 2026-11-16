@@ -1,6 +1,4 @@
-// config.js — the numbers the whole game is tuned by: who fights, how
-// long a round lasts, what the shop charges, how every gun behaves and
-// how fast a body moves. Other modules read these tables and act.
+// config.js — the numbers the whole game is tuned by.
 
 export const TEAMS = {
   atk: { name: 'Breachers', color: 0xe8963c, css: '#e8963c' },

@@ -1,7 +1,5 @@
-// map.js — the yard itself: an 80 by 60 metre freight yard at night.
-// Alongside the meshes it builds the invisible structure the game
-// reasons with: box colliders, two plant sites, a waypoint graph for
-// the bots, hold points and spawn points.
+// map.js — the yard: meshes plus colliders, plant sites, the
+// waypoint graph, hold points and spawns.
 
 import * as THREE from 'three';
 import { G } from './state.js';
@@ -42,6 +40,18 @@ export function siteAt(map, x, z) {
     if (x >= s.x0 && x <= s.x1 && z >= s.z0 && z <= s.z1) return s;
   }
   return null;
+}
+
+// The yard's spoken geography, for radio callouts: a plant site by
+// its letter, else the lane or the stacks the position falls in.
+export function placeName(map, x, z) {
+  const s = siteAt(map, x, z);
+  if (s) return `Site ${s.id}`;
+  if (z < -19) return 'the north lane';
+  if (z > 14) return 'the south lanes';
+  if (x < -18) return 'the west stacks';
+  if (x > 18) return 'the east stacks';
+  return 'mid';
 }
 
 export function nearestNode(map, x, z) {

@@ -1,16 +1,5 @@
-// feedback.js — the game's feel, in one place: trauma-based camera
-// shake, tiered event feedback and overlap-safe hit-stop.
-//
-// The rules: shake comes from trauma, never from an event directly —
-// events add trauma, the camera offset is trauma^2 times a summed-sine
-// wobble (incommensurate rates 1.7, 2.3, 1.1; phase advancing 30/s),
-// applied to the camera only, snapping to exactly zero at rest. Trauma
-// decays at 1.2/s in REAL time, so it keeps draining while hit-stop
-// freezes the sim. Hit-stop slows the world to 5%; every request
-// carries a monotonically increasing id and only the newest request
-// may set the restore point, so overlapping stops never restore early
-// or stack; no stop exceeds .15 s. The red damage flash is capped at
-// 3 full flashes per second (WCAG 2.3.1); hits past the cap show dimmer.
+// feedback.js — the game's feel: trauma shake, tiered event feedback,
+// overlap-safe hit-stop, and the rate-limited damage flash.
 
 import { G } from './state.js';
 import { spawnBurst } from './effects.js';

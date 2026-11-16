@@ -1,8 +1,4 @@
-// postfx.js — the fullscreen finish: the rendered frame passes once
-// through a shader that lays on the vignette, the warm sodium grade, a
-// breath of grain, the damage vignette and the flashbang white-out.
-// One extra pass, one texture sample per pixel — the sandbox frame
-// budget never notices it, and the night looks graded rather than raw.
+// postfx.js — the fullscreen finish: grade, vignette, grain.
 
 import * as THREE from 'three';
 import { G } from './state.js';

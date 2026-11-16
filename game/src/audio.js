@@ -1,9 +1,4 @@
-// audio.js — every sound is synthesised with WebAudio: shaped noise
-// bursts and oscillators, no audio files. The context is created
-// lazily on the first user gesture (the Play click), as browsers
-// require. Gunfire is thinned and darkened with distance so a
-// firefight can be read by ear. Every function is a no-op until the
-// context exists, which keeps the module safe to call anywhere.
+// audio.js — all sound, synthesised with WebAudio; no audio files.
 
 let ctx = null;
 let master = null;

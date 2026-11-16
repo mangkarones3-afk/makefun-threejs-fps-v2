@@ -1,10 +1,4 @@
-// shaders.js — every hand-written GLSL block in the game, kept as data
-// in one module so the whole set can be compile-checked headlessly
-// (desktop GLSL and ES 3.00 forms) without booting the game. The
-// discipline: one coordinate space per lighting sum, interpolated
-// directions re-normalized in the fragment stage, branchless
-// mix/step/smoothstep shaping — edges never reversed; a falloff that
-// runs the other way is written 1.0 - s.
+// shaders.js — every hand-written GLSL block in the game.
 
 export const POST_VERT = /* glsl */`
 varying vec2 vUv;

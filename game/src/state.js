@@ -1,6 +1,4 @@
-// state.js — the one place the match's shared state lives. Every
-// module reads and writes through G, so a round can be reasoned about
-// (and a headless test can drive it) without chasing module variables.
+// state.js — G: the match's shared state, read and written by all.
 
 export const G = {
   scene: null, camera: null, map: null, actors: [], player: null,
@@ -13,7 +11,7 @@ export const G = {
   winner: null, winHow: '', matchWinner: null, targetSite: 'A',
   charge: null, // { state, carrier, x, z, site, timer }
   interactor: null, interactKind: '', interactT: 0,
-  grenades: [], smokes: [], noises: [], events: [], feed: [],
+  grenades: [], smokes: [], noises: [], events: [], feed: [], radio: [],
   // Presentation beats, written by weapons/feedback, read by player/hud.
   shake: 0, hitStop: 0, hitMarkAt: -9, killMarkAt: -9, lastKill: null,
   flashTime: 0, damageFlash: 0,

@@ -1,17 +1,22 @@
-// rounds.js — the match itself: the phase machine (buy, live, end),
-// the charge plant/defuse channels, scoring, the economy, and the
-// round plans the bots wake up with.
+// rounds.js — the match: phase machine, charge, scoring, economy.
 
 import { TIMING, ECONOMY, WEAPONS, GEAR, MAX_GRENADES } from './config.js';
 import { G, resetCharge, aliveCount } from './state.js';
 import { Actor, buildActorMesh } from './actors.js';
 import { Brain } from './bots.js';
-import { siteAt } from './map.js';
+import { siteAt, placeName } from './map.js';
 import { chargeMeshRef, spawnExplosion } from './effects.js';
 import { feedback, resetFeedback } from './feedback.js';
 import { sfxBeep, sfxExplosion, sfxPlantStart, sfxRoundEnd } from './audio.js';
 
 let beepAt = 0;
+
+// Radio traffic: one short line per event that matters, named by the
+// yard's own places. The HUD shows the last few under the objective.
+export function radio(text) {
+  G.radio.push({ text, at: G.time });
+  if (G.radio.length > 3) G.radio.shift();
+}
 
 export function createActors(scene) {
   const player = new Actor('atk', 0, true);
@@ -194,6 +199,7 @@ function updateCharge(dt) {
         c.state = 'carried';
         c.carrier = a;
         G.feed.push({ text: `${a.name} picked up the charge`, at: G.time });
+        radio(`${a.name} has the charge — moving`);
         break;
       }
     }
@@ -211,6 +217,7 @@ function updateCharge(dt) {
         c.timer = TIMING.chargeTimer;
         carrier.money = Math.min(ECONOMY.maxMoney, carrier.money + ECONOMY.plantReward);
         G.feed.push({ text: `Charge planted at Site ${site.id}`, at: G.time });
+        radio(`Charge planted — Site ${site.id}, ${site.name}`);
         sfxBeep(false);
         stopChannel();
       }
@@ -281,9 +288,17 @@ function endRound(winner, how) {
 function drainEvents() {
   for (const ev of G.events) {
     if (ev.type === 'kill') {
-      const who = ev.attacker ? ev.attacker.name : 'The yard';
-      G.feed.push({ text: `${who}  ▸  ${ev.victim.name}${ev.part === 'head' ? '  (headshot)' : ''}`, at: G.time });
+      const a = ev.attacker, v = ev.victim;
+      G.feed.push({
+        kill: true, aName: a ? a.name : 'The yard', aTeam: a ? a.team : v.team,
+        weapon: a ? a.current.def.name : '', vName: v.name, vTeam: v.team,
+        head: ev.part === 'head', at: G.time,
+      });
       if (G.feed.length > 6) G.feed.shift();
+      const place = placeName(G.map, v.pos.x, v.pos.z);
+      radio(v.team === 'def'
+        ? `Contact at ${place} — Warden down`
+        : `Breacher down at ${place}`);
     }
   }
   G.events.length = 0;
@@ -297,6 +312,7 @@ export function updateRounds(dt) {
       if (G.phaseTime <= 0) {
         G.phase = 'live';
         G.phaseTime = TIMING.roundLive;
+        radio(`Round live — target Site ${G.targetSite}`);
       }
       syncChargeMesh();
       break;

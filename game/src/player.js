@@ -1,12 +1,4 @@
-// player.js — the human's hands and eyes: keyboard and mouse (pointer
-// lock), movement under the same acceleration rules as the bots, the
-// camera, and the first-person viewmodel. The camera is where the feel
-// systems land: recoil rides on top of the aim pitch and recovers
-// along an exponential curve; the trauma shake from feedback.js is
-// added as a camera-only offset (the body never moves); the viewmodel
-// bobs, sways behind fast looks, kicks with each shot and dips on
-// reloads and landings — every motion eased, every one settling back
-// to its exact rest value.
+// player.js — the human's hands and eyes: input, camera, viewmodel.
 
 import * as THREE from 'three';
 import { MOVE } from './config.js';
